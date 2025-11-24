@@ -50,38 +50,11 @@ class Renderer: NSObject, MTKViewDelegate {
     func buildPipelineStates() {
         var library: MTLLibrary?
         // Load the library
-        // 1. Try loading from the bundle (precompiled default.metallib)
         do {
             library = try device.makeDefaultLibrary(bundle: Bundle.module)
         } catch {
             print("Note: Could not load default library from bundle: \(error)")
-        }
-        
-        // 2. If that fails, try to find Shaders.metal and compile from source
-        if library == nil {
-            if let shaderURL = Bundle.module.url(forResource: "Shaders", withExtension: "metal") {
-                do {
-                    var source = try String(contentsOf: shaderURL)
-                    
-                    // Manually handle the include
-                    if let headerURL = Bundle.module.url(forResource: "ShaderDefinitions", withExtension: "h") {
-                        let headerContent = try String(contentsOf: headerURL)
-                        source = source.replacingOccurrences(of: "#include \"ShaderDefinitions.h\"", with: headerContent)
-                    }
-                    
-                    library = try device.makeLibrary(source: source, options: nil)
-                    print("Successfully compiled shaders from source.")
-                } catch {
-                    print("Error compiling shaders from source: \(error)")
-                }
-            } else {
-                print("Could not find Shaders.metal in bundle")
-            }
-        }
-        
-        // 3. Fallback to main bundle (system default)
-        if library == nil {
-             library = device.makeDefaultLibrary()
+            return
         }
         
         guard let lib = library else {
