@@ -1,4 +1,6 @@
 #include <metal_stdlib>
+// Targeting Metal 3.1+
+
 #include "ShaderDefinitions.h"
 
 using namespace metal;

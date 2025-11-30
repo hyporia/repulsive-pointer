@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 @main
-@available(macOS 11.0, *)
+@available(macOS 14.0, *)
 struct MetalParticlesApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     

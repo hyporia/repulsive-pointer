@@ -27,7 +27,7 @@ class Renderer: NSObject, MTKViewDelegate {
     var uniformsBuffer: MTLBuffer!
     
     var particles: [Particle] = []
-    let particleCount = 10000
+    let particleCount = 5000
     
     var viewportSize: CGSize = .zero
     var mousePosition: CGPoint = .zero
@@ -51,15 +51,41 @@ class Renderer: NSObject, MTKViewDelegate {
         var library: MTLLibrary?
         // Load the library
         do {
-            library = try device.makeDefaultLibrary(bundle: Bundle.module)
+            // Try to load from default library first (if it exists)
+            if let defaultLib = device.makeDefaultLibrary() {
+                library = defaultLib
+                print("Loaded default library")
+            } else {
+                // Fallback: Compile from source
+                print("Default library not found, compiling from source...")
+                guard let shaderPath = Bundle.module.path(forResource: "Shaders", ofType: "metal"),
+                      let headerPath = Bundle.module.path(forResource: "ShaderDefinitions", ofType: "h") else {
+                    print("Could not find Shaders.metal or ShaderDefinitions.h in bundle")
+                    return
+                }
+                
+                let shaderSource = try String(contentsOfFile: shaderPath, encoding: .utf8)
+                let headerSource = try String(contentsOfFile: headerPath, encoding: .utf8)
+                
+                // Simple include replacement
+                let finalSource = shaderSource.replacingOccurrences(of: "#include \"ShaderDefinitions.h\"", with: headerSource)
+                
+                library = try device.makeLibrary(source: finalSource, options: nil)
+                print("Compiled library from source")
+            }
         } catch {
-            print("Note: Could not load default library from bundle: \(error)")
+            print("Library error: \(error)")
             return
         }
         
         guard let lib = library else {
             print("Could not create default library")
             return
+        }
+        print("Library loaded successfully")
+        
+        if !device.supportsFamily(.metal3) {
+            print("Warning: Device does not support Metal 3")
         }
         
         // Compute Pipeline
@@ -68,8 +94,12 @@ class Renderer: NSObject, MTKViewDelegate {
             return
         }
         
+        let computeDescriptor = MTLComputePipelineDescriptor()
+        computeDescriptor.computeFunction = kernelFunction
+        computeDescriptor.label = "Particle Update"
+        
         do {
-            computePipelineState = try device.makeComputePipelineState(function: kernelFunction)
+            computePipelineState = try device.makeComputePipelineState(descriptor: computeDescriptor, options: [], reflection: nil)
         } catch {
             print("Compute pipeline error: \(error)")
         }
@@ -129,37 +159,42 @@ class Renderer: NSObject, MTKViewDelegate {
     func draw(in view: MTKView) {
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
               let drawable = view.currentDrawable,
-              let descriptor = view.currentRenderPassDescriptor else { return }
+              let _ = view.currentRenderPassDescriptor else { return }
         
         // Update Uniforms
         var uniforms = Uniforms(
             mousePosition: SIMD2<Float>(Float(mousePosition.x), Float(mousePosition.y)),
             time: Float(CACurrentMediaTime()),
             resolution: SIMD2<Float>(Float(viewportSize.width), Float(viewportSize.height)),
-            repulsionRadius: 150.0,
+            repulsionRadius: 300.0,
             repulsionStrength: 2.0
         )
         
         // Compute Pass
         if let computeEncoder = commandBuffer.makeComputeCommandEncoder() {
-            computeEncoder.setComputePipelineState(computePipelineState)
-            computeEncoder.setBuffer(particleBuffer, offset: 0, index: 0)
-            computeEncoder.setBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            
-            let threadGroupSize = MTLSize(width: computePipelineState.threadExecutionWidth, height: 1, depth: 1)
-            let threadGroups = MTLSize(width: (particleCount + threadGroupSize.width - 1) / threadGroupSize.width, height: 1, depth: 1)
-            
-            computeEncoder.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadGroupSize)
+            if let pipeline = computePipelineState {
+                computeEncoder.setComputePipelineState(pipeline)
+                computeEncoder.setBuffer(particleBuffer, offset: 0, index: 0)
+                computeEncoder.setBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+                
+                let threadGroupSize = MTLSize(width: pipeline.threadExecutionWidth, height: 1, depth: 1)
+                let threadGroups = MTLSize(width: (particleCount + threadGroupSize.width - 1) / threadGroupSize.width, height: 1, depth: 1)
+                
+                computeEncoder.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadGroupSize)
+            }
             computeEncoder.endEncoding()
         }
         
         // Render Pass
-        if let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) {
-            renderEncoder.setRenderPipelineState(renderPipelineState)
-            renderEncoder.setVertexBuffer(particleBuffer, offset: 0, index: 0)
-            renderEncoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            
-            renderEncoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: particleCount)
+        if let descriptor = view.currentRenderPassDescriptor,
+           let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) {
+            if let pipeline = renderPipelineState {
+                renderEncoder.setRenderPipelineState(pipeline)
+                renderEncoder.setVertexBuffer(particleBuffer, offset: 0, index: 0)
+                renderEncoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+                
+                renderEncoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: particleCount)
+            }
             renderEncoder.endEncoding()
         }
         
