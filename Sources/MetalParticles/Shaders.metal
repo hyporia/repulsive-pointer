@@ -61,9 +61,16 @@ vertex VertexOut vertexShader(uint vertexID [[vertex_id]],
     float2 clipPos = (pixelPos / resolution) * 2.0 - 1.0;
     clipPos.y = -clipPos.y; // Flip Y for Metal
     
+    float speed = length(particle.velocity);
+    float maxSpeed = 10.0; // Adjust this value to control sensitivity
+    float intensity = clamp(speed / maxSpeed, 0.0, 1.0);
+    
+    float4 baseColor = float4(0.6, 0.8, 1.0, 1.0); // Light blue
+    float4 targetColor = float4(1.0, 0.2, 0.2, 1.0); // Reddish
+    
     out.position = float4(clipPos, 0.0, 1.0);
     out.pointSize = 3.0; // Particle size
-    out.color = float4(0.6, 0.8, 1.0, 1.0); // Light blue color
+    out.color = mix(baseColor, targetColor, intensity);
     
     return out;
 }
